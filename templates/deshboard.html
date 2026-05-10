@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - RailHost</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-gray-800">
+    <nav class="bg-gray-900/50 backdrop-blur-lg border-b border-gray-700 sticky top-0 z-10">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex justify-between items-center">
+                <div class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                    🚆 RailHost
+                </div>
+                <div class="flex items-center space-x-6">
+                    <span class="text-gray-300">Welcome, {{ user.name }}</span>
+                    <a href="/logout" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition text-sm">
+                        Logout
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="container mx-auto px-6 py-8">
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8" id="stats">
+            <div class="bg-gray-800/50 backdrop-blur-lg rounded-xl p-6 border border-gray-700">
+                <div class="text-gray-400 text-sm">Total Servers</div>
+                <div class="text-3xl font-bold text-white" id="totalServers">0</div>
+            </div>
+            <div class="bg-gray-800/50 backdrop-blur-lg rounded-xl p-6 border border-gray-700">
+                <div class="text-gray-400 text-sm">Running Servers</div>
+                <div class="text-3xl font-bold text-green-400" id="runningServers">0</div>
+            </div>
+            <div class="bg-gray-800/50 backdrop-blur-lg rounded-xl p-6 border border-gray-700">
+                <div class="text-gray-400 text-sm">CPU Usage</div>
+                <div class="text-3xl font-bold text-blue-400" id="cpuUsage">0%</div>
+            </div>
+            <div class="bg-gray-800/50 backdrop-blur-lg rounded-xl p-6 border border-gray-700">
+                <div class="text-gray-400 text-sm">Memory Usage</div>
+                <div class="text-3xl font-bold text-purple-400" id="memoryUsage">0%</div>
+            </div>
+        </div>
+        
+        <!-- Create Server Button -->
+        <div class="mb-6">
+            <button onclick="showCreateModal()" class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-semibold transition">
+                + Create New Server
+            </button>
+        </div>
+        
+        <!-- Servers List -->
+        <div class="bg-gray-800/50 backdrop-blur-lg rounded-xl border border-gray-700 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-700">
+                <h2 class="text-xl font-semibold text-white">Your Servers</h2>
+            </div>
+            <div id="serversList" class="divide-y divide-gray-700">
+                <div class="p-6 text-center text-gray-400">Loading servers...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Create Server Modal -->
+    <div id="createModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-20">
+        <div class="bg-gray-800 rounded-2xl p-6 w-full max-w-md">
+            <h3 class="text-xl font-semibold text-white mb-4">Create New Server</h3>
+            <input type="text" id="serverName" placeholder="Server Name" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white mb-4">
+            <input type="text" id="startupFile" placeholder="Startup File (main.py)" value="main.py" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white mb-4">
+            <div class="flex justify-end space-x-3">
+                <button onclick="hideCreateModal()" class="px-4 py-2 bg-gray-700 rounded-lg">Cancel</button>
+                <button onclick="createServer()" class="px-4 py-2 bg-blue-600 rounded-lg">Create</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let servers = [];
+        let statsInterval;
+        
+        function loadServers() {
+            fetch('/api/servers')
+                .then(res => res.json())
+                .then(data => {
+                    servers = data;
+                    renderServers();
+                    updateStats();
+                });
+        }
+        
+        function renderServers() {
+            const container = document.getElementById('serversList');
+            if (!servers.length) {
+                container.innerHTML = '<div class="p-6 text-center text-gray-400">No servers yet. Create your first server!</div>';
+                return;
+            }
+            
+            container.innerHTML = servers.map(server => `
+                <div class="p-6">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h3 class="text-lg font-semibold text-white">${escapeHtml(server.name)}</h3>
+                            <p class="text-gray-400 text-sm mt-1">Folder: ${server.folder}</p>
+                            <div class="flex space-x-4 mt-2">
+                                <span class="text-xs px-2 py-1 rounded-full ${server.online ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
+                                    ${server.online ? '● Running' : '● Stopped'}
+                                </span>
+                                ${server.online ? `
+                                    <span class="text-xs text-gray-400">CPU: ${server.cpu?.toFixed(1) || 0}%</span>
+                                    <span class="text-xs text-gray-400">RAM: ${server.memory?.toFixed(1) || 0} MB</span>
+                                    <span class="text-xs text-gray-400">Uptime: ${formatUptime(server.uptime || 0)}</span>
+                                ` : ''}
+                            </div>
+                        </div>
+                        <div class="flex space-x-2">
+                            ${!server.online ? 
+                                `<button onclick="startServer('${server.folder}')" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm transition">Start</button>` :
+                                `<button onclick="stopServer('${server.folder}')" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition">Stop</button>
+                                 <button onclick="restartServer('${server.folder}')" class="bg-yellow-600 hover:bg-yellow-700 px-3 py-1 rounded text-sm transition">Restart</button>`
+                            }
+                            <button onclick="viewLogs('${server.folder}')" class="bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded text-sm transition">Logs</button>
+                            <button onclick="deleteServer('${server.folder}')" class="bg-red-800 hover:bg-red-900 px-3 py-1 rounded text-sm transition">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function updateStats() {
+            const total = servers.length;
+            const running = servers.filter(s => s.online).length;
+            document.getElementById('totalServers').innerText = total;
+            document.getElementById('runningServers').innerText = running;
+        }
+        
+        function loadSystemStats() {
+            fetch('/api/system-stats')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('cpuUsage').innerText = data.cpu + '%';
+                    document.getElementById('memoryUsage').innerText = data.memory + '%';
+                });
+        }
+        
+        function startServer(folder) {
+            fetch(`/api/start-server/${folder}`, { method: 'POST' })
+                .then(() => setTimeout(loadServers, 1000));
+        }
+        
+        function stopServer(folder) {
+            fetch(`/api/stop-server/${folder}`, { method: 'POST' })
+                .then(() => setTimeout(loadServers, 1000));
+        }
+        
+        function restartServer(folder) {
+            fetch(`/api/restart-server/${folder}`, { method: 'POST' })
+                .then(() => setTimeout(loadServers, 2000));
+        }
+        
+        function deleteServer(folder) {
+            if (confirm('Are you sure you want to delete this server?')) {
+                fetch(`/api/delete-server/${folder}`, { method: 'DELETE' })
+                    .then(() => loadServers());
+            }
+        }
+        
+        function viewLogs(folder) {
+            fetch(`/api/server-logs/${folder}`)
+                .then(res => res.json())
+                .then(data => {
+                    alert('Logs:\n\n' + data.logs.slice(-2000));
+                });
+        }
+        
+        function showCreateModal() {
+            document.getElementById('createModal').classList.remove('hidden');
+            document.getElementById('createModal').classList.add('flex');
+        }
+        
+        function hideCreateModal() {
+            document.getElementById('createModal').classList.add('hidden');
+            document.getElementById('createModal').classList.remove('flex');
+        }
+        
+        function createServer() {
+            const name = document.getElementById('serverName').value;
+            const startup = document.getElementById('startupFile').value;
+            
+            if (!name) {
+                alert('Server name required');
+                return;
+            }
+            
+            fetch('/api/create-server', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, startup })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        hideCreateModal();
+                        document.getElementById('serverName').value = '';
+                        loadServers();
+                    } else {
+                        alert(data.error);
+                    }
+                });
+        }
+        
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Auto refresh every 5 seconds
+        loadServers();
+        loadSystemStats();
+        statsInterval = setInterval(() => {
+            loadServers();
+            loadSystemStats();
+        }, 5000);
+    </script>
+</body>
+</html>
